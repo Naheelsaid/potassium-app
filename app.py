@@ -2,7 +2,6 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import os
-import json
 from datetime import datetime
 import matplotlib.pyplot as plt
 from catboost import CatBoostRegressor, Pool
@@ -94,20 +93,17 @@ st.markdown("""
 # ── Google Sheets connection ───────────────────────────────────────────────
 @st.cache_resource
 def get_gsheet():
-    scope = ['https://spreadsheets.google.com/feeds',
-             'https://www.googleapis.com/auth/drive']
-    # Load credentials from Streamlit secrets
-    creds_dict = st.secrets["gcp_service_account"]
-    creds      = ServiceAccountCredentials.from_json_keyfile_dict(
-                    dict(creds_dict), scope)
-    client     = gspread.authorize(creds)
-    sheet      = client.open('potassium_patients').sheet1
+    scope  = ['https://spreadsheets.google.com/feeds',
+               'https://www.googleapis.com/auth/drive']
+    creds  = ServiceAccountCredentials.from_json_keyfile_dict(
+                dict(st.secrets["gcp_service_account"]), scope)
+    client = gspread.authorize(creds)
+    sheet  = client.open('potassium_patients').sheet1
     return sheet
 
 def save_to_gsheet(row):
     try:
         sheet = get_gsheet()
-        # Add header if sheet is empty
         if sheet.row_count == 0 or sheet.cell(1, 1).value is None:
             sheet.append_row(list(row.keys()))
         sheet.append_row(list(row.values()))
@@ -295,7 +291,7 @@ if page == "💊 Calculator":
 
     input_df = pd.DataFrame([input_dict])
 
-    # ── Predict ───────────────────────────────────────────────────────────
+    # ── Predict button ────────────────────────────────────────────────────
     predict_btn = st.button("🔮 Calculate Potassium Response")
 
     if predict_btn:
@@ -317,97 +313,130 @@ if page == "💊 Calculator":
             total_delta = pred * dose / 10
             post_k      = pre_k + total_delta
 
-            # ── Results ───────────────────────────────────────────────
-            st.markdown("---")
-            st.markdown("### 📊 Prediction Results")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.markdown(f"""
-                    <div class='metric-card'>
-                        <div class='metric-label'>Δ K per 10 mEq</div>
-                        <div class='metric-value'>{pred:.3f}</div>
-                        <div class='metric-unit'>mEq/L</div>
-                    </div>""", unsafe_allow_html=True)
-            with col2:
-                st.markdown(f"""
-                    <div class='metric-card'>
-                        <div class='metric-label'>Total Expected Δ K</div>
-                        <div class='metric-value'>{total_delta:.3f}</div>
-                        <div class='metric-unit'>mEq/L</div>
-                    </div>""", unsafe_allow_html=True)
-            with col3:
-                st.markdown(f"""
-                    <div class='metric-card'>
-                        <div class='metric-label'>Expected Post-dose K</div>
-                        <div class='metric-value'>{post_k:.2f}</div>
-                        <div class='metric-unit'>mEq/L</div>
-                    </div>""", unsafe_allow_html=True)
-
-            if post_k < 3.0:
-                st.markdown(f"""
-                    <div class='alert-warning'>
-                        ⚠️ Expected post-dose K still low: {post_k:.2f} mEq/L<br>
-                        Consider additional potassium replacement
-                    </div>""", unsafe_allow_html=True)
-            elif post_k > 5.5:
-                st.markdown(f"""
-                    <div class='alert-danger'>
-                        🚨 Risk of hyperkalemia: {post_k:.2f} mEq/L<br>
-                        Monitor closely — consider dose reduction
-                    </div>""", unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                    <div class='alert-success'>
-                        ✅ Expected post-dose K in acceptable range: {post_k:.2f} mEq/L
-                    </div>""", unsafe_allow_html=True)
-
-            st.markdown("---")
-            severity = ("Normal"   if pre_k >= 3.5 else
-                        "Mild"     if pre_k >= 3.0 else
-                        "Moderate" if pre_k >= 2.5 else
-                        "Severe")
-            st.info(f"📌 Baseline K: **{severity}** ({pre_k} mEq/L) | "
-                    f"Dose: **{dose} mEq** | Cancer: **{cancer}**")
-
-            # ── Save to Google Sheets ──────────────────────────────────
-            st.markdown("---")
-            st.markdown("<div class='section-header'>💾 Save Patient Data</div>",
-                        unsafe_allow_html=True)
-            col1, col2 = st.columns(2)
-            with col1:
-                patient_id = st.text_input("Patient ID", value="")
-            with col2:
-                actual_k = st.number_input(
-                    "Actual Post-dose K (mEq/L)",
-                    min_value=1.0, max_value=9.0,
-                    value=float(round(post_k, 1)), step=0.1)
-
-            save_btn = st.button("💾 Save to Google Sheets")
-
-            if save_btn:
-                row = {
-                    'timestamp':              datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'patient_id':             patient_id,
-                    'age':                    age,
-                    'gender':                 gender,
-                    'cancer':                 cancer,
-                    'icu_category':           icu_cat,
-                    'baseline_K':             pre_k,
-                    'dose_mEq':               dose,
-                    'GFR':                    gfr,
-                    'severity':               severity,
-                    'predicted_delta_per_10': round(pred, 4),
-                    'predicted_total_delta':  round(total_delta, 4),
-                    'predicted_post_K':       round(post_k, 4),
-                    'actual_post_K':          actual_k,
-                    'error':                  round(actual_k - post_k, 4),
-                    'abs_error':              round(abs(actual_k - post_k), 4),
-                }
-                if save_to_gsheet(row):
-                    st.success(f"✅ Patient **{patient_id}** saved to Google Sheets permanently!")
-
+            # ── Save to session state ─────────────────────────────────
+            st.session_state['pred']        = pred
+            st.session_state['total_delta'] = total_delta
+            st.session_state['post_k']      = post_k
+            st.session_state['input_dict']  = input_dict
+            st.session_state['pre_k']       = pre_k
+            st.session_state['dose']        = dose
+            st.session_state['cancer']      = cancer
+            st.session_state['icu_cat']     = icu_cat
+            st.session_state['gender']      = gender
+            st.session_state['severity']    = ("Normal"   if pre_k >= 3.5 else
+                                               "Mild"     if pre_k >= 3.0 else
+                                               "Moderate" if pre_k >= 2.5 else
+                                               "Severe")
         except Exception as e:
             st.error(f"⚠️ Error: {e}")
+
+    # ── Show results — stays visible after any button press ───────────────
+    if 'pred' in st.session_state:
+
+        pred        = st.session_state['pred']
+        total_delta = st.session_state['total_delta']
+        post_k      = st.session_state['post_k']
+        input_dict  = st.session_state['input_dict']
+        pre_k       = st.session_state['pre_k']
+        dose        = st.session_state['dose']
+        cancer      = st.session_state['cancer']
+        icu_cat     = st.session_state['icu_cat']
+        gender      = st.session_state['gender']
+        severity    = st.session_state['severity']
+
+        # ── Results ───────────────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("### 📊 Prediction Results")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(f"""
+                <div class='metric-card'>
+                    <div class='metric-label'>Δ K per 10 mEq</div>
+                    <div class='metric-value'>{pred:.3f}</div>
+                    <div class='metric-unit'>mEq/L</div>
+                </div>""", unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"""
+                <div class='metric-card'>
+                    <div class='metric-label'>Total Expected Δ K</div>
+                    <div class='metric-value'>{total_delta:.3f}</div>
+                    <div class='metric-unit'>mEq/L</div>
+                </div>""", unsafe_allow_html=True)
+        with col3:
+            st.markdown(f"""
+                <div class='metric-card'>
+                    <div class='metric-label'>Expected Post-dose K</div>
+                    <div class='metric-value'>{post_k:.2f}</div>
+                    <div class='metric-unit'>mEq/L</div>
+                </div>""", unsafe_allow_html=True)
+
+        if post_k < 3.0:
+            st.markdown(f"""
+                <div class='alert-warning'>
+                    ⚠️ Expected post-dose K still low: {post_k:.2f} mEq/L<br>
+                    Consider additional potassium replacement
+                </div>""", unsafe_allow_html=True)
+        elif post_k > 5.5:
+            st.markdown(f"""
+                <div class='alert-danger'>
+                    🚨 Risk of hyperkalemia: {post_k:.2f} mEq/L<br>
+                    Monitor closely — consider dose reduction
+                </div>""", unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+                <div class='alert-success'>
+                    ✅ Expected post-dose K in acceptable range: {post_k:.2f} mEq/L
+                </div>""", unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.info(f"📌 Baseline K: **{severity}** ({pre_k} mEq/L) | "
+                f"Dose: **{dose} mEq** | Cancer: **{cancer}**")
+
+        # ── Save section ──────────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("<div class='section-header'>💾 Save Patient Data</div>",
+                    unsafe_allow_html=True)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            patient_id = st.text_input("Patient ID", value="")
+        with col2:
+            actual_k = st.number_input(
+                "Actual Post-dose K (mEq/L)",
+                min_value=1.0, max_value=9.0,
+                value=float(round(post_k, 1)), step=0.1,
+                help="Fill after lab result is available")
+
+        save_btn = st.button("💾 Save to Google Sheets")
+
+        if save_btn:
+            row = {
+                'timestamp':              datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'patient_id':             patient_id,
+                'age':                    input_dict['age'],
+                'gender':                 gender,
+                'cancer':                 cancer,
+                'icu_category':           icu_cat,
+                'baseline_K':             pre_k,
+                'dose_mEq':               dose,
+                'GFR':                    input_dict['GFR'],
+                'severity':               severity,
+                'predicted_delta_per_10': round(pred, 4),
+                'predicted_total_delta':  round(total_delta, 4),
+                'predicted_post_K':       round(post_k, 4),
+                'actual_post_K':          actual_k,
+                'error':                  round(actual_k - post_k, 4),
+                'abs_error':              round(abs(actual_k - post_k), 4),
+            }
+            if save_to_gsheet(row):
+                st.success(f"✅ Patient **{patient_id}** saved permanently!")
+                # Clear session for next patient
+                for key in ['pred','total_delta','post_k','input_dict',
+                            'pre_k','dose','cancer','icu_cat',
+                            'gender','severity']:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════
 # PAGE 2 — External Validation
@@ -415,21 +444,29 @@ if page == "💊 Calculator":
 elif page == "📊 External Validation":
 
     st.markdown("# 📊 External Validation")
+    st.markdown(
+        "<p style='color:#666; font-size:0.9rem;'>"
+        "Performance of the model on prospectively collected patients</p>",
+        unsafe_allow_html=True)
 
     df_val = load_from_gsheet()
 
     if df_val.empty:
-        st.warning("No data saved yet.")
+        st.warning("⚠️ No data saved yet. Use the calculator and save patients first.")
     else:
         st.markdown(f"**Total patients saved: {len(df_val):,}**")
-        df_complete = df_val.dropna(subset=['actual_post_K'])
-        df_complete = df_complete[df_complete['actual_post_K'] > 0].copy()
-        df_complete['actual_post_K']    = pd.to_numeric(df_complete['actual_post_K'],    errors='coerce')
-        df_complete['predicted_post_K'] = pd.to_numeric(df_complete['predicted_post_K'], errors='coerce')
-        df_complete = df_complete.dropna(subset=['actual_post_K','predicted_post_K'])
+
+        df_complete = df_val.dropna(subset=['actual_post_K']).copy()
+        df_complete['actual_post_K']    = pd.to_numeric(
+            df_complete['actual_post_K'],    errors='coerce')
+        df_complete['predicted_post_K'] = pd.to_numeric(
+            df_complete['predicted_post_K'], errors='coerce')
+        df_complete = df_complete.dropna(
+            subset=['actual_post_K','predicted_post_K'])
+        df_complete = df_complete[df_complete['actual_post_K'] > 0]
 
         if len(df_complete) < 5:
-            st.info(f"{len(df_complete)} complete records. Need at least 5.")
+            st.info(f"ℹ️ {len(df_complete)} complete records. Need at least 5.")
         else:
             mae  = mean_absolute_error(df_complete['actual_post_K'],
                                        df_complete['predicted_post_K'])
@@ -453,7 +490,7 @@ elif page == "📊 External Validation":
             fig1, ax1 = plt.subplots(figsize=(6, 5))
             ax1.scatter(df_complete['actual_post_K'],
                         df_complete['predicted_post_K'],
-                        alpha=0.6, color='#2C3E7A', s=50)
+                        alpha=0.6, color='#2C3E7A', s=50, edgecolors='white')
             mn = min(df_complete['actual_post_K'].min(),
                      df_complete['predicted_post_K'].min()) - 0.2
             mx = max(df_complete['actual_post_K'].max(),
@@ -461,27 +498,51 @@ elif page == "📊 External Validation":
             ax1.plot([mn,mx],[mn,mx],'r--',lw=2,label='Perfect prediction')
             ax1.set_xlabel('Actual Post-dose K (mEq/L)')
             ax1.set_ylabel('Predicted Post-dose K (mEq/L)')
-            ax1.set_title(f'Predicted vs Actual | N={len(df_complete)} | R²={r2:.3f}',
+            ax1.set_title(f'Predicted vs Actual | N={len(df_complete)} | '
+                          f'R²={r2:.3f} | MAE={mae:.3f}',
                           fontweight='bold')
             ax1.legend(); ax1.grid(True, alpha=0.3)
             ax1.spines['top'].set_visible(False)
             ax1.spines['right'].set_visible(False)
             st.pyplot(fig1)
 
+            # Error Distribution
+            fig2, ax2 = plt.subplots(figsize=(6, 4))
+            errors = (df_complete['actual_post_K'] -
+                      df_complete['predicted_post_K'])
+            ax2.hist(errors, bins=20, color='#2C3E7A',
+                     alpha=0.75, edgecolor='white')
+            ax2.axvline(0,             color='red',   linestyle='--',
+                        lw=2, label='Zero error')
+            ax2.axvline(errors.mean(), color='green', linestyle='--',
+                        lw=2, label=f'Mean: {errors.mean():.3f}')
+            ax2.set_xlabel('Prediction Error (Actual − Predicted)')
+            ax2.set_ylabel('Count')
+            ax2.set_title('Error Distribution', fontweight='bold')
+            ax2.legend(); ax2.grid(True, alpha=0.3)
+            ax2.spines['top'].set_visible(False)
+            ax2.spines['right'].set_visible(False)
+            st.pyplot(fig2)
+
             # Bland-Altman
             fig3, ax3 = plt.subplots(figsize=(6, 4))
             means     = (df_complete['actual_post_K'] +
                          df_complete['predicted_post_K']) / 2
-            diffs     = df_complete['actual_post_K'] - df_complete['predicted_post_K']
+            diffs     = (df_complete['actual_post_K'] -
+                         df_complete['predicted_post_K'])
             mean_diff = diffs.mean()
             std_diff  = diffs.std()
-            ax3.scatter(means, diffs, alpha=0.6, color='#2C3E7A', s=50)
-            ax3.axhline(mean_diff,               color='red',  lw=2,
+            ax3.scatter(means, diffs, alpha=0.6, color='#2C3E7A',
+                        s=50, edgecolors='white')
+            ax3.axhline(mean_diff,
+                        color='red', lw=2,
                         label=f'Mean bias: {mean_diff:.3f}')
-            ax3.axhline(mean_diff+1.96*std_diff, color='gray', lw=1.5,
-                        linestyle='--', label=f'+1.96 SD: {mean_diff+1.96*std_diff:.3f}')
-            ax3.axhline(mean_diff-1.96*std_diff, color='gray', lw=1.5,
-                        linestyle='--', label=f'-1.96 SD: {mean_diff-1.96*std_diff:.3f}')
+            ax3.axhline(mean_diff + 1.96*std_diff,
+                        color='gray', lw=1.5, linestyle='--',
+                        label=f'+1.96 SD: {mean_diff+1.96*std_diff:.3f}')
+            ax3.axhline(mean_diff - 1.96*std_diff,
+                        color='gray', lw=1.5, linestyle='--',
+                        label=f'-1.96 SD: {mean_diff-1.96*std_diff:.3f}')
             ax3.axhline(0, color='black', lw=0.8, alpha=0.4)
             ax3.set_xlabel('Mean of Actual and Predicted (mEq/L)')
             ax3.set_ylabel('Actual − Predicted (mEq/L)')
@@ -491,17 +552,20 @@ elif page == "📊 External Validation":
             ax3.spines['right'].set_visible(False)
             st.pyplot(fig3)
 
-        # Table
+        # ── Raw data table ────────────────────────────────────────────
+        st.markdown("---")
         st.markdown("### 📋 Saved Patients")
         show_cols = ['timestamp','patient_id','baseline_K','dose_mEq',
-                     'cancer','icu_category','predicted_post_K',
-                     'actual_post_K','error','abs_error']
+                     'cancer','icu_category','severity',
+                     'predicted_post_K','actual_post_K',
+                     'error','abs_error']
         show_cols = [c for c in show_cols if c in df_val.columns]
-        st.dataframe(df_val[show_cols].sort_values(
-            'timestamp', ascending=False).head(50),
+        st.dataframe(
+            df_val[show_cols].sort_values(
+                'timestamp', ascending=False).head(50),
             use_container_width=True)
 
-        # Download
+        # ── Download ──────────────────────────────────────────────────
         st.download_button(
             label="⬇️ Download All Data as CSV",
             data=df_val.to_csv(index=False),
