@@ -323,6 +323,35 @@ if page == "💊 Calculator":
             st.session_state['cancer']      = cancer
             st.session_state['icu_cat']     = icu_cat
             st.session_state['gender']      = gender
+            st.session_state['weight']      = weight
+            st.session_state['height']      = height
+            st.session_state['bmi']         = bmi
+            st.session_state['icu_los']     = icu_los
+            st.session_state['mv_hrs']      = mv_hrs
+            st.session_state['gfr']         = gfr
+            st.session_state['mg']          = mg
+            st.session_state['bicarb']      = bicarb
+            st.session_state['calcium']     = calcium
+            st.session_state['glucose']     = glucose
+            st.session_state['bun']         = bun
+            st.session_state['albumin']     = albumin
+            st.session_state['creat']       = creat
+            st.session_state['mv']          = mv
+            st.session_state['loop']        = loop
+            st.session_state['thiazide']    = thiazide
+            st.session_state['calcineurin'] = calcineurin
+            st.session_state['digoxin']     = digoxin
+            st.session_state['heparin']     = heparin
+            st.session_state['magnesium']   = magnesium
+            st.session_state['feeding']     = feeding
+            st.session_state['glucocort']   = glucocort
+            st.session_state['beta']        = beta
+            st.session_state['insulin']     = insulin
+            st.session_state['vasopressor'] = vasopressor
+            st.session_state['ace']         = ace
+            st.session_state['sodium_bic']  = sodium_bic
+            st.session_state['arbs']        = arbs
+            st.session_state['potassium_s'] = potassium_s
             st.session_state['severity']    = ("Normal"   if pre_k >= 3.5 else
                                                "Mild"     if pre_k >= 3.0 else
                                                "Moderate" if pre_k >= 2.5 else
@@ -330,7 +359,7 @@ if page == "💊 Calculator":
         except Exception as e:
             st.error(f"⚠️ Error: {e}")
 
-    # ── Show results — stays visible after any button press ───────────────
+    # ── Show results ──────────────────────────────────────────────────────
     if 'pred' in st.session_state:
 
         pred        = st.session_state['pred']
@@ -342,9 +371,38 @@ if page == "💊 Calculator":
         cancer      = st.session_state['cancer']
         icu_cat     = st.session_state['icu_cat']
         gender      = st.session_state['gender']
+        weight      = st.session_state['weight']
+        height      = st.session_state['height']
+        bmi         = st.session_state['bmi']
+        icu_los     = st.session_state['icu_los']
+        mv_hrs      = st.session_state['mv_hrs']
+        gfr         = st.session_state['gfr']
+        mg          = st.session_state['mg']
+        bicarb      = st.session_state['bicarb']
+        calcium     = st.session_state['calcium']
+        glucose     = st.session_state['glucose']
+        bun         = st.session_state['bun']
+        albumin     = st.session_state['albumin']
+        creat       = st.session_state['creat']
+        mv          = st.session_state['mv']
+        loop        = st.session_state['loop']
+        thiazide    = st.session_state['thiazide']
+        calcineurin = st.session_state['calcineurin']
+        digoxin     = st.session_state['digoxin']
+        heparin     = st.session_state['heparin']
+        magnesium   = st.session_state['magnesium']
+        feeding     = st.session_state['feeding']
+        glucocort   = st.session_state['glucocort']
+        beta        = st.session_state['beta']
+        insulin     = st.session_state['insulin']
+        vasopressor = st.session_state['vasopressor']
+        ace         = st.session_state['ace']
+        sodium_bic  = st.session_state['sodium_bic']
+        arbs        = st.session_state['arbs']
+        potassium_s = st.session_state['potassium_s']
         severity    = st.session_state['severity']
 
-        # ── Results ───────────────────────────────────────────────────
+        # ── Results cards ─────────────────────────────────────────────
         st.markdown("---")
         st.markdown("### 📊 Prediction Results")
         col1, col2, col3 = st.columns(3)
@@ -411,31 +469,62 @@ if page == "💊 Calculator":
 
         if save_btn:
             row = {
-                'timestamp':              datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'patient_id':             patient_id,
-                'age':                    input_dict['age'],
-                'gender':                 gender,
-                'cancer':                 cancer,
-                'icu_category':           icu_cat,
-                'baseline_K':             pre_k,
-                'dose_mEq':               dose,
-                'GFR':                    input_dict['GFR'],
-                'severity':               severity,
-                'predicted_delta_per_10': round(pred, 4),
-                'predicted_total_delta':  round(total_delta, 4),
-                'predicted_post_K':       round(post_k, 4),
-                'actual_post_K':          actual_k,
-                'error':                  round(actual_k - post_k, 4),
-                'abs_error':              round(abs(actual_k - post_k), 4),
+                # ── Patient Info ──────────────────────────────────────
+                'timestamp':               datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'patient_id':              patient_id,
+                # ── Demographics ──────────────────────────────────────
+                'age':                     input_dict['age'],
+                'gender':                  gender,
+                'weight_kg':               weight,
+                'height_cm':               height,
+                'BMI':                     round(bmi, 2) if not np.isnan(bmi) else '',
+                'icu_los_hours':           icu_los,
+                'mv_duration_hrs':         mv_hrs,
+                'cancer':                  cancer,
+                'icu_category':            icu_cat,
+                'severity':                severity,
+                # ── Labs ──────────────────────────────────────────────
+                'baseline_K':              pre_k,
+                'dose_mEq':                dose,
+                'GFR_CrCl':               gfr,
+                'serum_Mg':                mg,
+                'bicarbonate':             bicarb,
+                'calcium':                 calcium,
+                'glucose':                 glucose,
+                'BUN':                     bun,
+                'albumin':                 albumin,
+                'creatinine':              creat,
+                # ── Medications ───────────────────────────────────────
+                'mechanical_ventilation':  'Yes' if mv          else 'No',
+                'loop_diuretics':          'Yes' if loop        else 'No',
+                'thiazide_diuretics':      'Yes' if thiazide    else 'No',
+                'calcineurin_inhibitors':  'Yes' if calcineurin else 'No',
+                'digoxin':                 'Yes' if digoxin     else 'No',
+                'heparin':                 'Yes' if heparin     else 'No',
+                'iv_magnesium':            'Yes' if magnesium   else 'No',
+                'enteral_feeding':         'Yes' if feeding     else 'No',
+                'glucocorticoids':         'Yes' if glucocort   else 'No',
+                'beta_adrenergic':         'Yes' if beta        else 'No',
+                'insulin':                 'Yes' if insulin     else 'No',
+                'vasopressors':            'Yes' if vasopressor else 'No',
+                'ace_inhibitors':          'Yes' if ace         else 'No',
+                'sodium_bicarbonate':      'Yes' if sodium_bic  else 'No',
+                'arbs':                    'Yes' if arbs        else 'No',
+                'k_sparing_diuretics':     'Yes' if potassium_s else 'No',
+                # ── Predictions ───────────────────────────────────────
+                'predicted_delta_per_10':  round(pred, 4),
+                'predicted_total_delta':   round(total_delta, 4),
+                'predicted_post_K':        round(post_k, 4),
+                # ── Validation ────────────────────────────────────────
+                'actual_post_K':           actual_k,
+                'error':                   round(actual_k - post_k, 4),
+                'abs_error':               round(abs(actual_k - post_k), 4),
             }
+
             if save_to_gsheet(row):
-                st.success(f"✅ Patient **{patient_id}** saved permanently!")
-                # Clear session for next patient
-                for key in ['pred','total_delta','post_k','input_dict',
-                            'pre_k','dose','cancer','icu_cat',
-                            'gender','severity']:
-                    if key in st.session_state:
-                        del st.session_state[key]
+                st.success(f"✅ Patient **{patient_id}** saved with all data!")
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
                 st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -555,10 +644,18 @@ elif page == "📊 External Validation":
         # ── Raw data table ────────────────────────────────────────────
         st.markdown("---")
         st.markdown("### 📋 Saved Patients")
-        show_cols = ['timestamp','patient_id','baseline_K','dose_mEq',
-                     'cancer','icu_category','severity',
-                     'predicted_post_K','actual_post_K',
-                     'error','abs_error']
+        show_cols = [
+            'timestamp','patient_id','age','gender','cancer',
+            'icu_category','severity','baseline_K','dose_mEq',
+            'GFR_CrCl','serum_Mg','bicarbonate','calcium',
+            'glucose','BUN','albumin','creatinine',
+            'mechanical_ventilation','loop_diuretics','thiazide_diuretics',
+            'calcineurin_inhibitors','digoxin','heparin','iv_magnesium',
+            'enteral_feeding','glucocorticoids','beta_adrenergic',
+            'insulin','vasopressors','ace_inhibitors',
+            'sodium_bicarbonate','arbs','k_sparing_diuretics',
+            'predicted_post_K','actual_post_K','error','abs_error'
+        ]
         show_cols = [c for c in show_cols if c in df_val.columns]
         st.dataframe(
             df_val[show_cols].sort_values(
