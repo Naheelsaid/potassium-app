@@ -1,12 +1,14 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import csv
 import os
+import json
 from datetime import datetime
 import matplotlib.pyplot as plt
 from catboost import CatBoostRegressor, Pool
 from sklearn.metrics import mean_absolute_error, r2_score
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
 st.set_page_config(
     page_title="IV Potassium Calculator",
@@ -14,7 +16,7 @@ st.set_page_config(
     layout="centered"
 )
 
-# ── Custom mobile-friendly CSS ─────────────────────────────────────────────
+# ── CSS ───────────────────────────────────────────────────────────────────
 st.markdown("""
     <style>
     .main { padding: 0.5rem; }
@@ -47,14 +49,8 @@ st.markdown("""
         text-transform: uppercase;
         letter-spacing: 0.05em;
     }
-    .metric-value {
-        font-size: 2rem;
-        font-weight: bold;
-    }
-    .metric-unit {
-        font-size: 0.85rem;
-        opacity: 0.75;
-    }
+    .metric-value { font-size: 2rem; font-weight: bold; }
+    .metric-unit  { font-size: 0.85rem; opacity: 0.75; }
     .section-header {
         background: #f0f4ff;
         border-left: 4px solid #2C3E7A;
@@ -66,53 +62,68 @@ st.markdown("""
         font-size: 1rem;
     }
     .alert-success {
-        background: #d4edda;
-        border: 1px solid #28a745;
-        border-radius: 10px;
-        padding: 1rem;
-        color: #155724;
-        text-align: center;
-        font-weight: bold;
-        font-size: 1rem;
-        margin-top: 0.5rem;
+        background: #d4edda; border: 1px solid #28a745;
+        border-radius: 10px; padding: 1rem; color: #155724;
+        text-align: center; font-weight: bold;
+        font-size: 1rem; margin-top: 0.5rem;
     }
     .alert-warning {
-        background: #fff3cd;
-        border: 1px solid #ffc107;
-        border-radius: 10px;
-        padding: 1rem;
-        color: #856404;
-        text-align: center;
-        font-weight: bold;
-        font-size: 1rem;
-        margin-top: 0.5rem;
+        background: #fff3cd; border: 1px solid #ffc107;
+        border-radius: 10px; padding: 1rem; color: #856404;
+        text-align: center; font-weight: bold;
+        font-size: 1rem; margin-top: 0.5rem;
     }
     .alert-danger {
-        background: #f8d7da;
-        border: 1px solid #dc3545;
-        border-radius: 10px;
-        padding: 1rem;
-        color: #721c24;
-        text-align: center;
-        font-weight: bold;
-        font-size: 1rem;
-        margin-top: 0.5rem;
+        background: #f8d7da; border: 1px solid #dc3545;
+        border-radius: 10px; padding: 1rem; color: #721c24;
+        text-align: center; font-weight: bold;
+        font-size: 1rem; margin-top: 0.5rem;
     }
     div[data-testid="stNumberInput"] input {
-        font-size: 1.05rem;
-        height: 2.8rem;
-        border-radius: 8px;
+        font-size: 1.05rem; height: 2.8rem; border-radius: 8px;
     }
     div[data-testid="stSelectbox"] select {
-        font-size: 1.05rem;
-        height: 2.8rem;
-        border-radius: 8px;
+        font-size: 1.05rem; height: 2.8rem; border-radius: 8px;
     }
     .stCheckbox label { font-size: 1rem; }
     h1 { font-size: 1.5rem !important; text-align: center; color: #2C3E7A; }
     h3 { font-size: 1.1rem !important; color: #2C3E7A; }
     </style>
 """, unsafe_allow_html=True)
+
+# ── Google Sheets connection ───────────────────────────────────────────────
+@st.cache_resource
+def get_gsheet():
+    scope = ['https://spreadsheets.google.com/feeds',
+             'https://www.googleapis.com/auth/drive']
+    # Load credentials from Streamlit secrets
+    creds_dict = st.secrets["gcp_service_account"]
+    creds      = ServiceAccountCredentials.from_json_keyfile_dict(
+                    dict(creds_dict), scope)
+    client     = gspread.authorize(creds)
+    sheet      = client.open('potassium_patients').sheet1
+    return sheet
+
+def save_to_gsheet(row):
+    try:
+        sheet = get_gsheet()
+        # Add header if sheet is empty
+        if sheet.row_count == 0 or sheet.cell(1, 1).value is None:
+            sheet.append_row(list(row.keys()))
+        sheet.append_row(list(row.values()))
+        return True
+    except Exception as e:
+        st.error(f"Save error: {e}")
+        return False
+
+def load_from_gsheet():
+    try:
+        sheet   = get_gsheet()
+        records = sheet.get_all_records()
+        return pd.DataFrame(records)
+    except Exception as e:
+        st.error(f"Load error: {e}")
+        return pd.DataFrame()
 
 # ── Load model ─────────────────────────────────────────────────────────────
 @st.cache_resource
@@ -123,20 +134,9 @@ def load_model():
 
 model = load_model()
 
-# ── Save patient data function ─────────────────────────────────────────────
-def save_patient_data(row):
-    file       = 'patient_predictions.csv'
-    file_exists = os.path.exists(file)
-    with open(file, 'a', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=row.keys())
-        if not file_exists:
-            writer.writeheader()
-        writer.writerow(row)
-
-# ══════════════════════════════════════════════════════════════════════════
-# Navigation
-# ══════════════════════════════════════════════════════════════════════════
-page = st.sidebar.selectbox("📄 Navigate", ["💊 Calculator", "📊 External Validation"])
+# ── Navigation ─────────────────────────────────────────────────────────────
+page = st.sidebar.selectbox("📄 Navigate",
+                             ["💊 Calculator", "📊 External Validation"])
 
 # ══════════════════════════════════════════════════════════════════════════
 # PAGE 1 — Calculator
@@ -152,7 +152,6 @@ if page == "💊 Calculator":
     # ── Demographics ──────────────────────────────────────────────────────
     st.markdown("<div class='section-header'>👤 Demographics</div>",
                 unsafe_allow_html=True)
-
     col1, col2 = st.columns(2)
     with col1:
         age     = st.number_input("Age (years)",       min_value=18,    max_value=120,    value=60)
@@ -162,7 +161,6 @@ if page == "💊 Calculator":
         gender  = st.selectbox("Gender",               ["Male", "Female"])
         height  = st.number_input("Height (cm)",       min_value=100.0, max_value=220.0,  value=170.0)
         mv_hrs  = st.number_input("MV Duration (hrs)", min_value=0.0,   max_value=2000.0, value=0.0)
-
     col1, col2 = st.columns(2)
     with col1:
         cancer = st.selectbox("Cancer", ["No", "Yes"])
@@ -170,12 +168,11 @@ if page == "💊 Calculator":
     # ── Laboratory Values ─────────────────────────────────────────────────
     st.markdown("<div class='section-header'>🧪 Laboratory Values</div>",
                 unsafe_allow_html=True)
-
     col1, col2 = st.columns(2)
     with col1:
         pre_k   = st.number_input("Baseline K (mEq/L)",   min_value=1.0,  max_value=7.0,   value=3.2, step=0.1)
         dose    = st.number_input("KCl Dose (mEq)",        min_value=1.0,  max_value=200.0, value=40.0)
-        gfr     = st.number_input("GFR (mL/min)",         min_value=1.0,  max_value=200.0, value=80.0)
+        gfr     = st.number_input("CrCl (mL/min)",         min_value=1.0,  max_value=200.0, value=80.0)
         mg      = st.number_input("Serum Mg (mEq/L)",      min_value=0.5,  max_value=5.0,   value=1.8, step=0.1)
         bicarb  = st.number_input("Bicarbonate (mEq/L)",   min_value=5.0,  max_value=50.0,  value=24.0)
     with col2:
@@ -188,7 +185,6 @@ if page == "💊 Calculator":
     # ── Medications ───────────────────────────────────────────────────────
     st.markdown("<div class='section-header'>💉 Medications & Interventions</div>",
                 unsafe_allow_html=True)
-
     col1, col2 = st.columns(2)
     with col1:
         mv          = st.checkbox("Mechanical Ventilation")
@@ -212,7 +208,6 @@ if page == "💊 Calculator":
     # ── ICU Diagnosis ─────────────────────────────────────────────────────
     st.markdown("<div class='section-header'>🏥 ICU Diagnosis</div>",
                 unsafe_allow_html=True)
-
     icu_cat = st.selectbox("ICU Category", [
         "Cardiovascular", "Burns_trauma", "Endocrine",
         "Gastrointestinal", "Hematology", "Neurologic",
@@ -225,27 +220,18 @@ if page == "💊 Calculator":
     cancer_b      = int(cancer == "Yes")
     bmi           = weight / ((height / 100) ** 2)
     bmi_clean     = bmi if 10 <= bmi <= 100 else np.nan
-
     k_mild        = int(3.0 <= pre_k < 3.5)
     k_moderate    = int(2.5 <= pre_k < 3.0)
     k_severe      = int(pre_k < 2.5)
     gfr_3060      = int(30 <= gfr <= 60)
     gfr_lt30      = int(gfr < 30)
-
-    mv_b          = int(mv)
-    loop_b        = int(loop)
-    thiazide_b    = int(thiazide)
-    calcineurin_b = int(calcineurin)
-    digoxin_b     = int(digoxin)
-    heparin_b     = int(heparin)
-    magnesium_b   = int(magnesium)
-    glucocort_b   = int(glucocort)
-    beta_b        = int(beta)
-    insulin_b     = int(insulin)
-    vasopressor_b = int(vasopressor)
-    ace_b         = int(ace)
-    sodium_bic_b  = int(sodium_bic)
-    feeding_b     = int(feeding)
+    mv_b          = int(mv);          loop_b        = int(loop)
+    thiazide_b    = int(thiazide);    calcineurin_b = int(calcineurin)
+    digoxin_b     = int(digoxin);     heparin_b     = int(heparin)
+    magnesium_b   = int(magnesium);   glucocort_b   = int(glucocort)
+    beta_b        = int(beta);        insulin_b     = int(insulin)
+    vasopressor_b = int(vasopressor); ace_b         = int(ace)
+    sodium_bic_b  = int(sodium_bic);  feeding_b     = int(feeding)
 
     icu_options = ['Burns_trauma','Endocrine','Gastrointestinal','Hematology',
                    'Neurologic','Other','Renal','Respiratory',
@@ -309,7 +295,7 @@ if page == "💊 Calculator":
 
     input_df = pd.DataFrame([input_dict])
 
-    # ── Predict button ────────────────────────────────────────────────────
+    # ── Predict ───────────────────────────────────────────────────────────
     predict_btn = st.button("🔮 Calculate Potassium Response")
 
     if predict_btn:
@@ -334,7 +320,6 @@ if page == "💊 Calculator":
             # ── Results ───────────────────────────────────────────────
             st.markdown("---")
             st.markdown("### 📊 Prediction Results")
-
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.markdown(f"""
@@ -358,7 +343,6 @@ if page == "💊 Calculator":
                         <div class='metric-unit'>mEq/L</div>
                     </div>""", unsafe_allow_html=True)
 
-            # ── Clinical alert ─────────────────────────────────────────
             if post_k < 3.0:
                 st.markdown(f"""
                     <div class='alert-warning'>
@@ -377,54 +361,53 @@ if page == "💊 Calculator":
                         ✅ Expected post-dose K in acceptable range: {post_k:.2f} mEq/L
                     </div>""", unsafe_allow_html=True)
 
-            # ── Severity summary ───────────────────────────────────────
             st.markdown("---")
             severity = ("Normal"   if pre_k >= 3.5 else
                         "Mild"     if pre_k >= 3.0 else
                         "Moderate" if pre_k >= 2.5 else
                         "Severe")
-            st.info(
-                f"📌 Baseline K severity: **{severity}** ({pre_k} mEq/L) | "
-                f"Dose: **{dose} mEq** | Cancer: **{cancer}**"
-            )
+            st.info(f"📌 Baseline K: **{severity}** ({pre_k} mEq/L) | "
+                    f"Dose: **{dose} mEq** | Cancer: **{cancer}**")
 
-            # ── Save patient data ──────────────────────────────────────
+            # ── Save to Google Sheets ──────────────────────────────────
             st.markdown("---")
             st.markdown("<div class='section-header'>💾 Save Patient Data</div>",
                         unsafe_allow_html=True)
-
             col1, col2 = st.columns(2)
             with col1:
-                patient_id = st.text_input("Patient ID (optional)", value="")
+                patient_id = st.text_input("Patient ID", value="")
             with col2:
                 actual_k = st.number_input(
                     "Actual Post-dose K (mEq/L)",
                     min_value=1.0, max_value=9.0,
-                    value=float(round(post_k, 1)), step=0.1,
-                    help="Fill this in after the actual lab result is available"
-                )
+                    value=float(round(post_k, 1)), step=0.1)
 
-            save_btn = st.button("💾 Save This Patient")
+            save_btn = st.button("💾 Save to Google Sheets")
 
             if save_btn:
-                row = input_dict.copy()
-                row['patient_id']             = patient_id
-                row['cancer']                 = cancer
-                row['icu_category']           = icu_cat
-                row['predicted_delta_per_10'] = round(pred, 4)
-                row['predicted_total_delta']  = round(total_delta, 4)
-                row['predicted_post_K']       = round(post_k, 4)
-                row['actual_post_K']          = actual_k
-                row['error']                  = round(actual_k - post_k, 4)
-                row['abs_error']              = round(abs(actual_k - post_k), 4)
-                row['timestamp']              = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-                save_patient_data(row)
-                st.success(f"✅ Patient {patient_id} saved successfully!")
+                row = {
+                    'timestamp':              datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'patient_id':             patient_id,
+                    'age':                    age,
+                    'gender':                 gender,
+                    'cancer':                 cancer,
+                    'icu_category':           icu_cat,
+                    'baseline_K':             pre_k,
+                    'dose_mEq':               dose,
+                    'GFR':                    gfr,
+                    'severity':               severity,
+                    'predicted_delta_per_10': round(pred, 4),
+                    'predicted_total_delta':  round(total_delta, 4),
+                    'predicted_post_K':       round(post_k, 4),
+                    'actual_post_K':          actual_k,
+                    'error':                  round(actual_k - post_k, 4),
+                    'abs_error':              round(abs(actual_k - post_k), 4),
+                }
+                if save_to_gsheet(row):
+                    st.success(f"✅ Patient **{patient_id}** saved to Google Sheets permanently!")
 
         except Exception as e:
-            st.error(f"⚠️ Prediction error: {e}")
-            st.info("Make sure 'catboost_potassium_model.cbm' is in the same folder as app.py")
+            st.error(f"⚠️ Error: {e}")
 
 # ══════════════════════════════════════════════════════════════════════════
 # PAGE 2 — External Validation
@@ -432,38 +415,31 @@ if page == "💊 Calculator":
 elif page == "📊 External Validation":
 
     st.markdown("# 📊 External Validation")
-    st.markdown(
-        "<p style='color:#666; font-size:0.9rem;'>"
-        "Performance of the model on prospectively collected patients</p>",
-        unsafe_allow_html=True)
 
-    file = 'patient_predictions.csv'
+    df_val = load_from_gsheet()
 
-    if not os.path.exists(file):
-        st.warning("⚠️ No data saved yet. Use the calculator first and save patients.")
+    if df_val.empty:
+        st.warning("No data saved yet.")
     else:
-        df_val = pd.read_csv(file)
         st.markdown(f"**Total patients saved: {len(df_val):,}**")
-
         df_complete = df_val.dropna(subset=['actual_post_K'])
-        df_complete = df_complete[df_complete['actual_post_K'] > 0]
+        df_complete = df_complete[df_complete['actual_post_K'] > 0].copy()
+        df_complete['actual_post_K']    = pd.to_numeric(df_complete['actual_post_K'],    errors='coerce')
+        df_complete['predicted_post_K'] = pd.to_numeric(df_complete['predicted_post_K'], errors='coerce')
+        df_complete = df_complete.dropna(subset=['actual_post_K','predicted_post_K'])
 
         if len(df_complete) < 5:
-            st.info(f"ℹ️ {len(df_complete)} complete records so far. "
-                    f"Need at least 5 to show validation metrics.")
+            st.info(f"{len(df_complete)} complete records. Need at least 5.")
         else:
-            mae  = mean_absolute_error(
-                df_complete['actual_post_K'],
-                df_complete['predicted_post_K'])
-            r2   = r2_score(
-                df_complete['actual_post_K'],
-                df_complete['predicted_post_K'])
+            mae  = mean_absolute_error(df_complete['actual_post_K'],
+                                       df_complete['predicted_post_K'])
+            r2   = r2_score(df_complete['actual_post_K'],
+                            df_complete['predicted_post_K'])
             bias = (df_complete['predicted_post_K'] -
                     df_complete['actual_post_K']).mean()
             rmse = np.sqrt(((df_complete['predicted_post_K'] -
                              df_complete['actual_post_K'])**2).mean())
 
-            # ── Metrics row ───────────────────────────────────────────
             st.markdown("### 📈 Performance Metrics")
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("R²",   f"{r2:.3f}")
@@ -473,78 +449,51 @@ elif page == "📊 External Validation":
 
             st.markdown("---")
 
-            # ── Plot 1: Predicted vs Actual ───────────────────────────
+            # Predicted vs Actual
             fig1, ax1 = plt.subplots(figsize=(6, 5))
-            ax1.scatter(
-                df_complete['actual_post_K'],
-                df_complete['predicted_post_K'],
-                alpha=0.6, color='#2C3E7A', s=50, edgecolors='white')
+            ax1.scatter(df_complete['actual_post_K'],
+                        df_complete['predicted_post_K'],
+                        alpha=0.6, color='#2C3E7A', s=50)
             mn = min(df_complete['actual_post_K'].min(),
                      df_complete['predicted_post_K'].min()) - 0.2
             mx = max(df_complete['actual_post_K'].max(),
                      df_complete['predicted_post_K'].max()) + 0.2
-            ax1.plot([mn,mx],[mn,mx], 'r--', lw=2, label='Perfect prediction')
-            ax1.set_xlabel('Actual Post-dose K (mEq/L)', fontsize=11)
-            ax1.set_ylabel('Predicted Post-dose K (mEq/L)', fontsize=11)
-            ax1.set_title(f'Predicted vs Actual\nN={len(df_complete)} | '
-                          f'R²={r2:.3f} | MAE={mae:.3f}',
-                          fontsize=11, fontweight='bold')
-            ax1.legend(fontsize=9)
-            ax1.grid(True, alpha=0.3)
+            ax1.plot([mn,mx],[mn,mx],'r--',lw=2,label='Perfect prediction')
+            ax1.set_xlabel('Actual Post-dose K (mEq/L)')
+            ax1.set_ylabel('Predicted Post-dose K (mEq/L)')
+            ax1.set_title(f'Predicted vs Actual | N={len(df_complete)} | R²={r2:.3f}',
+                          fontweight='bold')
+            ax1.legend(); ax1.grid(True, alpha=0.3)
             ax1.spines['top'].set_visible(False)
             ax1.spines['right'].set_visible(False)
             st.pyplot(fig1)
 
-            # ── Plot 2: Error Distribution ────────────────────────────
-            fig2, ax2 = plt.subplots(figsize=(6, 4))
-            errors = df_complete['actual_post_K'] - df_complete['predicted_post_K']
-            ax2.hist(errors, bins=20, color='#2C3E7A',
-                     alpha=0.75, edgecolor='white')
-            ax2.axvline(0,            color='red',  linestyle='--', lw=2, label='Zero error')
-            ax2.axvline(errors.mean(),color='green', linestyle='--', lw=2,
-                        label=f'Mean error: {errors.mean():.3f}')
-            ax2.set_xlabel('Prediction Error (Actual − Predicted)', fontsize=11)
-            ax2.set_ylabel('Count', fontsize=11)
-            ax2.set_title('Error Distribution', fontsize=11, fontweight='bold')
-            ax2.legend(fontsize=9)
-            ax2.grid(True, alpha=0.3)
-            ax2.spines['top'].set_visible(False)
-            ax2.spines['right'].set_visible(False)
-            st.pyplot(fig2)
-
-            # ── Plot 3: Bland-Altman ──────────────────────────────────
+            # Bland-Altman
             fig3, ax3 = plt.subplots(figsize=(6, 4))
-            means = (df_complete['actual_post_K'] +
-                     df_complete['predicted_post_K']) / 2
-            diffs = df_complete['actual_post_K'] - df_complete['predicted_post_K']
-            mean_diff  = diffs.mean()
-            std_diff   = diffs.std()
-            upper_loa  = mean_diff + 1.96 * std_diff
-            lower_loa  = mean_diff - 1.96 * std_diff
-
-            ax3.scatter(means, diffs, alpha=0.6, color='#2C3E7A',
-                        s=50, edgecolors='white')
-            ax3.axhline(mean_diff,  color='red',  lw=2,
+            means     = (df_complete['actual_post_K'] +
+                         df_complete['predicted_post_K']) / 2
+            diffs     = df_complete['actual_post_K'] - df_complete['predicted_post_K']
+            mean_diff = diffs.mean()
+            std_diff  = diffs.std()
+            ax3.scatter(means, diffs, alpha=0.6, color='#2C3E7A', s=50)
+            ax3.axhline(mean_diff,               color='red',  lw=2,
                         label=f'Mean bias: {mean_diff:.3f}')
-            ax3.axhline(upper_loa,  color='gray', lw=1.5, linestyle='--',
-                        label=f'+1.96 SD: {upper_loa:.3f}')
-            ax3.axhline(lower_loa,  color='gray', lw=1.5, linestyle='--',
-                        label=f'-1.96 SD: {lower_loa:.3f}')
+            ax3.axhline(mean_diff+1.96*std_diff, color='gray', lw=1.5,
+                        linestyle='--', label=f'+1.96 SD: {mean_diff+1.96*std_diff:.3f}')
+            ax3.axhline(mean_diff-1.96*std_diff, color='gray', lw=1.5,
+                        linestyle='--', label=f'-1.96 SD: {mean_diff-1.96*std_diff:.3f}')
             ax3.axhline(0, color='black', lw=0.8, alpha=0.4)
-            ax3.set_xlabel('Mean of Actual and Predicted (mEq/L)', fontsize=11)
-            ax3.set_ylabel('Actual − Predicted (mEq/L)', fontsize=11)
-            ax3.set_title('Bland-Altman Plot', fontsize=11, fontweight='bold')
-            ax3.legend(fontsize=8)
-            ax3.grid(True, alpha=0.3)
+            ax3.set_xlabel('Mean of Actual and Predicted (mEq/L)')
+            ax3.set_ylabel('Actual − Predicted (mEq/L)')
+            ax3.set_title('Bland-Altman Plot', fontweight='bold')
+            ax3.legend(fontsize=8); ax3.grid(True, alpha=0.3)
             ax3.spines['top'].set_visible(False)
             ax3.spines['right'].set_visible(False)
             st.pyplot(fig3)
 
-        # ── Raw data table ────────────────────────────────────────────
-        st.markdown("---")
+        # Table
         st.markdown("### 📋 Saved Patients")
-
-        show_cols = ['timestamp','patient_id','pre_labresult','summed_dosage',
+        show_cols = ['timestamp','patient_id','baseline_K','dose_mEq',
                      'cancer','icu_category','predicted_post_K',
                      'actual_post_K','error','abs_error']
         show_cols = [c for c in show_cols if c in df_val.columns]
@@ -552,7 +501,7 @@ elif page == "📊 External Validation":
             'timestamp', ascending=False).head(50),
             use_container_width=True)
 
-        # ── Download button ───────────────────────────────────────────
+        # Download
         st.download_button(
             label="⬇️ Download All Data as CSV",
             data=df_val.to_csv(index=False),
